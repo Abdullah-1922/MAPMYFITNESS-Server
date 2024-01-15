@@ -130,8 +130,8 @@ app.get('/userInfo/:email',verifyToken, async(req,res)=>{
   const user = await userCollection.findOne(query);
   res.send(user);
 })
+// get all user
 app.get('/getallUser',verifyToken,async(req,res)=>{
- 
   const result = await userCollection.find().toArray();
  return res.send(result);
 })
@@ -150,22 +150,18 @@ app.put('/makeUserAdmin/:email',async(req,res)=>{
   const result = await userCollection.updateOne(filter,updateDoc)
   res.send(result);
 })
-//get all user
-app.get('/getallUser',verifyToken,async(req,res)=>{
- 
-  const result = await userCollection.find().toArray();
- return res.send(result);
+// update user profile  also update trainer profile
+app.put('/user/update/:email',async(req,res)=>{
+  const email = req.params.email;
+  const filter = {email: email}
+  const updatedProfile = req.body;
+  const updatedName=updatedProfile.userName
+  const updatedPhoto =updatedProfile.userPhoto
+ const result = await userCollection.updateOne(filter,{$set:{userName:updatedName,userPhoto:updatedPhoto}})
+ const updateTrainer = await trainerCollection.updateOne(filter,{$set:{name:updatedName,profileImage:updatedPhoto}})
+ return res.send(updateTrainer)
+
 })
-
-
-
-
-
-
-
-
-
-
 
 
   //Blog//
