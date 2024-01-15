@@ -5,7 +5,7 @@ const port = process.env.PORT || 5000;
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser')
-
+const moment = require('moment-timezone');
 const corsOptions = {
   origin: ['http://localhost:5173', 'http://localhost:5174'],
   credentials: true,
@@ -108,7 +108,7 @@ try {
     const user = req.body;
     const options = { upsert: true };
     const isExist = await userCollection.findOne({ email: user?.email })
-    if (isExist) {
+    if (isExist ) {
       const result = await userCollection.updateOne({ email: user?.email }, {
         $set: {
           lastLogin: Date.now()
@@ -118,15 +118,57 @@ try {
 
       return res.send({ message: "User already exist" })
     }
+
     const result = await userCollection.insertOne(user);
     res.send(result);
   })
 
+// get login user info from userCollection
+app.get('/userInfo/:email',verifyToken, async(req,res)=>{
+  const email = req.params.email;
+  const query = {email: email}
+  const user = await userCollection.findOne(query);
+  res.send(user);
+})
+app.get('/getallUser',verifyToken,async(req,res)=>{
+ 
+  const result = await userCollection.find().toArray();
+ return res.send(result);
+})
+//delete a user
+app.delete('/deleteUser/:email',verifyToken, async(req,res)=>{
+  const email = req.params.email;
+  const query = {email: email}
+  const user = await userCollection.deleteOne(query)
+  res.send(user);
+})
+// make user admin
+app.put('/makeUserAdmin/:email',async(req,res)=>{
+  const email = req.params.email;
+  const filter = {email: email}
+  const updateDoc = { $set: {role: 'admin'} };
+  const result = await userCollection.updateOne(filter,updateDoc)
+  res.send(result);
+})
+//get all user
+app.get('/getallUser',verifyToken,async(req,res)=>{
+ 
+  const result = await userCollection.find().toArray();
+ return res.send(result);
+})
+
+
+
+
+
+
+
+
+
+
 
 
   //Blog//
-
-
 
   //  add blog 
   app.post('/addBlog', verifyToken, async (req, res) => {
@@ -145,7 +187,7 @@ try {
     const page = parseInt(query.page);
     const size = parseInt(query.size);
 
-    const blogs = await blogCollection.find()
+    const blogs = await blogCollection.find().sort({ date: -1 })
       .skip(page * size)
       .limit(size)
       .toArray();
@@ -168,7 +210,7 @@ try {
     return res.send(result);
   })
   // add like in blog
-  app.put('/like', async (req, res) => {
+  app.put('/like',verifyToken, async (req, res) => {
     const { id, email } = req.body;
 
     const query = { _id: new ObjectId(id) }
@@ -181,7 +223,7 @@ try {
     const updateDoc = await blogCollection.updateOne(query, { $push: { likes: email } })
     return res.send(updateDoc);
   })
-  app.put('/unlike', async (req, res) => {
+  app.put('/unlike', verifyToken,async (req, res) => {
     const { id, email } = req.body;
 
     const query = { _id: new ObjectId(id) }
@@ -231,7 +273,7 @@ try {
 
   //Get blog for home page
   app.get('/homeblog',async(req,res)=>{
-    const result = await blogCollection.find().sort({timestampField:-1}).limit(3).toArray();
+    const result = await blogCollection.find().sort({ date: -1 }).limit(4).toArray();
    return res.send(result)
   })
 
@@ -254,17 +296,55 @@ try {
 
   //add trainer
 
-  app.post('/addTrainer',async(req,res)=>{
+
+  app.post('/addTrainer',verifyToken,async(req,res)=>{
     const trainer=req.body
     isExist =await trainerCollection.findOne({email:trainer?.email})
     if(isExist){
       return res.send({err:true,msg:'Trainer already exist'})}
+      const  updateUser = await userCollection.updateOne({email:trainer?.email},{$set:{trainerStatus:'pending'}})
+      console.log(updateUser);
     const result=await trainerCollection.insertOne(trainer)
     return res.send(result)
   })
+  //make an user trainer
+  app.put('/makeUserTrainer/:email',verifyToken,async(req,res)=>{
+    const email=req.params.email
+    const currentDateMoment = moment().tz('Asia/Dhaka');
+    const updateUser = await userCollection.updateOne({email:email},{$set:{trainerStatus:'verified',}})
+      const updateTrainer = await trainerCollection.updateOne({email:email},{$set:{trainerStatus:'verified',trainerFrom:currentDateMoment.format('YYYY-MM-DD')}})
+    return res.send(updateUser)
+  })
+  //reject user application for trainer
+  app.put('/rejectTrainer/:email',verifyToken,async(req,res)=>{
+    const email=req.params.email
+    
+    const updateUser = await userCollection.updateOne({email:email},{$set:{trainerStatus:'rejected'}})
+      const updateTrainer = await trainerCollection.deleteOne({email:email})
+    return res.send(updateUser)
+  })
 
+ // get all pending trainer
+ app.get('/getPendingTrainer',async(req,res)=>{
+  const result=await trainerCollection.find({trainerStatus:'pending'}).toArray()
+  return res.send(result)
+ })
+ 
 
+ // get all verified trainer
+ app.get('/getVerifiedTrainer',async(req,res)=>{
+  const result=await trainerCollection.find({trainerStatus:'verified'}).toArray()
+  return res.send(result)
+ })
 
+ // makeTrainerPending 
+ app.put('/makeTrainerPending/:email',async(req,res)=>{
+  const email=req.params.email
+  
+   await userCollection.updateOne({email:email},{$set:{trainerStatus:'pending'}})
+  const updateUser = await trainerCollection.updateOne({email:email},{$set:{trainerStatus:'pending'}})
+  return res.send(updateUser)
+ })
 
 } catch (err) {
   console.log(err);
