@@ -391,6 +391,13 @@ try {
       const result = await classCollection.find({}).toArray()
       return res.send(result)
     })
+    //get single class by id
+    app.get('/getClassInfo/:id',async(req,res)=>{
+      const id = req.params.id
+      const query = {_id: new ObjectId(id)}
+      const result = await classCollection.findOne(query)
+      return res.send(result)
+    })
 
 } catch (err) {
   console.log(err);
