@@ -6,6 +6,7 @@ require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser')
 const moment = require('moment-timezone');
+const stripe = require('stripe')(process.env.STRIPE_PAYMENT_SECRET_KEY)
 const corsOptions = {
   origin: ['http://localhost:5173', 'http://localhost:5174'],
   credentials: true,
@@ -86,13 +87,13 @@ const newsLetterSubCollection = client.db("MAPMYFITNESS").collection("newsletter
 const userCollection = client.db("MAPMYFITNESS").collection("users");
 const trainerCollection = client.db("MAPMYFITNESS").collection("trainers");
 const classCollection = client.db("MAPMYFITNESS").collection("classes");
+const paymentCollection = client.db("MAPMYFITNESS").collection("payments");
 
 
 async function run() {
   try {
 
     await client.connect();
-
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
@@ -215,7 +216,7 @@ try {
   app.get('/blog/:id', async (req, res) => {
     const id = req.params.id;
     const query = { _id: new ObjectId(id) }
-    console.log(query);
+
     const result = await blogCollection.findOne(query);
     return res.send(result);
   })
@@ -370,34 +371,88 @@ try {
   })
 
   // get a trainer
-  app.get('/getTrainer/:email', async(req,res)=>{
+  app.get('/getTrainer/:email', async (req, res) => {
     const email = req.params.email
-    const query = {email:email}
+    const query = { email: email }
     const result = await trainerCollection.findOne(query)
+    return res.send(result)
+  })
+  //get trainer classes
+  app.get('/getTrainerClasses/:email', async (req, res) => {
+    const email = req.params.email
+    const query = {
+      trainerEmail: email
+    }
+    const result = await classCollection.find(query).toArray()
     return res.send(result)
   })
 
   // class 
   //add class 
-  app.post('/addClass',async(req,res)=>{
-    
+  app.post('/addClass', async (req, res) => {
+
     const classInfo = req.body
     const result = await classCollection.insertOne(classInfo)
-    return res.send(result) })
+    return res.send(result)
+  })
 
-    //get all classes
+  //get all classes
 
-    app.get('/getAllClasses',async(req,res)=>{
-      const result = await classCollection.find({}).toArray()
-      return res.send(result)
+  app.get('/getAllClasses', async (req, res) => {
+    const result = await classCollection.find({}).toArray()
+    return res.send(result)
+  })
+  //get single class by id
+  app.get('/getClassInfo/:id', async (req, res) => {
+    const id = req.params.id
+    const query = { _id: new ObjectId(id) }
+    const result = await classCollection.findOne(query)
+    return res.send(result)
+  })
+// user join classes
+app.patch('/joinClasses',async(req,res)=>{
+const data =req.body
+console.log(data);
+ 
+} )
+
+
+
+  // payment api .Generate client secret key for stripe
+  app.post('/createPaymentIntent', verifyToken, async (req, res) => {
+    const {price}  = req.body
+    const amount =Number(price * 100)
+    if (!price || amount < 1) {
+      return res.send({ error: 'Please provide a valid amount' })
+    }
+    const { client_secret } = await stripe.paymentIntents.create({
+      amount: amount,
+      currency: 'usd',
+      payment_method_types: ['card']
     })
-    //get single class by id
-    app.get('/getClassInfo/:id',async(req,res)=>{
-      const id = req.params.id
-      const query = {_id: new ObjectId(id)}
-      const result = await classCollection.findOne(query)
-      return res.send(result)
-    })
+    res.send({ clientSecret: client_secret })
+  })
+// save payment data 
+app.post('/payment',async(req,res)=>{
+  const payment=req.body
+  const result=await paymentCollection.insertOne(payment)
+  //SEND EMAIL
+  return res.send(result)
+})
+//update user status
+app.patch('/updateUserStatus',async(req,res)=>{
+  const info =req.body
+  const filter={email: info.userEmail}
+  const status =info.packageName
+  const options={upsert:true}
+  const updatedDoc={
+    $set:{
+      userStatus: status
+    }
+  }
+  const result=await userCollection.updateOne(filter,updatedDoc,options)
+  return res.send(result) })
+
 
 } catch (err) {
   console.log(err);
