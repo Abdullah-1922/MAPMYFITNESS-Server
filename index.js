@@ -88,6 +88,7 @@ const userCollection = client.db("MAPMYFITNESS").collection("users");
 const trainerCollection = client.db("MAPMYFITNESS").collection("trainers");
 const classCollection = client.db("MAPMYFITNESS").collection("classes");
 const paymentCollection = client.db("MAPMYFITNESS").collection("payments");
+const forumCollection = client.db("MAPMYFITNESS").collection("forum");
 
 
 async function run() {
@@ -340,27 +341,26 @@ try {
     return res.send(updateUser)
   })
 
+
   // get all pending trainer
   app.get('/getPendingTrainer', async (req, res) => {
     const result = await trainerCollection.find({ trainerStatus: 'pending' }).toArray()
     return res.send(result)
   })
 
-
   // get all verified trainer
   app.get('/getVerifiedTrainer', async (req, res) => {
     const result = await trainerCollection.find({ trainerStatus: 'verified' }).toArray()
     return res.send(result)
   })
-
   // makeTrainerPending 
   app.put('/makeTrainerPending/:email', async (req, res) => {
     const email = req.params.email
-
     await userCollection.updateOne({ email: email }, { $set: { trainerStatus: 'pending' } })
     const updateUser = await trainerCollection.updateOne({ email: email }, { $set: { trainerStatus: 'pending' } })
     return res.send(updateUser)
   })
+
   // get trainer for home page
   app.get('/homePageTrainer', async (req, res) => {
     const query = {
@@ -369,25 +369,51 @@ try {
     const result = await trainerCollection.find(query).limit(4).toArray();
     return res.send(result)
   })
-
   // get a trainer
-  app.get('/getTrainer/:email', async (req, res) => {
-    const email = req.params.email
-    const query = { email: email }
+  app.get('/getTrainer/:id', async (req, res) => {
+    const id = req.params.id
+    
+    const query = { _id:  new ObjectId(id)}
     const result = await trainerCollection.findOne(query)
     return res.send(result)
   })
-  //get trainer classes
-  app.get('/getTrainerClasses/:email', async (req, res) => {
+
+  // get login trainer
+  app.get('/getLoginTrainer/:email', async (req, res) => {
     const email = req.params.email
-    const query = {
-      trainerEmail: email
-    }
-    const result = await classCollection.find(query).toArray()
+
+    const query = { email:  email}
+    const result = await trainerCollection.findOne(query)
+    return res.send(result)
+  })
+  //get trainer classes for user
+  app.get('/getTrainerClasses/:id', async (req, res) => {
+    const id = req.params.id
+      console.log(id);
+    const query = {_id: new ObjectId(id)}
+    
+
+    const result1 = await trainerCollection.findOne(query)
+    const query1 = { trainerEmail: result1?.email }
+    const result = await classCollection.find(query1).toArray()
+ 
+    return res.send(result)
+  })
+  //get trainer classes trainer dashboard
+  app.get('/getMyAddedClasses/:email', async (req, res) => {
+    const email = req.params.email
+      console.log(email);
+    const query = {email: email}
+    
+
+    const result1 = await trainerCollection.findOne(query)
+    const query1 = { trainerEmail: result1?.email }
+    const result = await classCollection.find(query1).toArray()
+ 
     return res.send(result)
   })
 
-  // class 
+  // class  
   //add class 
   app.post('/addClass', async (req, res) => {
 
@@ -402,6 +428,10 @@ try {
     const result = await classCollection.find({}).toArray()
     return res.send(result)
   })
+  //get classes for home page
+  app.get('/getHomeClasses', async (req, res) => {
+    const result = await classCollection.find({}).limit(6).toArray()
+    return res.send(result)})
   //get single class by id
   app.get('/getClassInfo/:id', async (req, res) => {
     const id = req.params.id
@@ -409,19 +439,48 @@ try {
     const result = await classCollection.findOne(query)
     return res.send(result)
   })
-// user join classes
-app.patch('/joinClasses',async(req,res)=>{
-const data =req.body
-console.log(data);
+  // user join classes 
+  app.patch('/joinClasses', verifyToken, async (req, res) => {
+    const data = req.body
+
+    const { id, email } = req.body;
+   
+    const query = { _id: new ObjectId(id) }
+
+    const option = { upsert: true };
+    const classData = await classCollection.findOne(query);
+    const isJoined = classData?.classStudent?.includes(email);
+    if (isJoined) {
+      return res.send('already joined in the class');
+    }
+    const updateDoc = await classCollection.updateOne(query, { $push: { classStudent: email } })
+    return res.send(updateDoc);
+  })
+
+// get user joined classes
+app.get('/userJoinedClasses/:email',async(req,res)=>{
+  const {email} = req.params
+  console.log(email,'jj');
+  const query ={classStudent: {$elemMatch: {$eq: email}}}
+  const result = await classCollection.find(query).toArray()
  
-} )
+  res.send(result)
+})
+//delete user course by class id and user email
+app.patch('/deleteUserClass',async(req,res)=>{
+   const {userEmail,classId}=req.body
+ const query = { _id: new ObjectId(classId) }
+ const result= await classCollection.updateOne(query, { $pull: { classStudent: userEmail } })
+ res.send(result)
+ console.log(result);
+})
 
 
 
   // payment api .Generate client secret key for stripe
   app.post('/createPaymentIntent', verifyToken, async (req, res) => {
-    const {price}  = req.body
-    const amount =Number(price * 100)
+    const { price } = req.body
+    const amount = Number(price * 100)
     if (!price || amount < 1) {
       return res.send({ error: 'Please provide a valid amount' })
     }
@@ -430,40 +489,41 @@ console.log(data);
       currency: 'usd',
       payment_method_types: ['card']
     })
+
     res.send({ clientSecret: client_secret })
   })
-// save payment data 
-app.post('/payment',async(req,res)=>{
-  const payment=req.body
-  const result=await paymentCollection.insertOne(payment)
-  //SEND EMAIL
-  return res.send(result)
-})
-//update user status
-app.patch('/updateUserStatus',async(req,res)=>{
-  const info =req.body
-  const filter={email: info.userEmail}
-  const status =info.packageName
-  const options={upsert:true}
-  const updatedDoc={
-    $set:{
-      userStatus: status
+  // save payment data 
+  app.post('/payment', async (req, res) => {
+    const payment = req.body
+    const result = await paymentCollection.insertOne(payment)
+    //SEND EMAIL
+    return res.send(result)
+  })
+  //update user status
+  app.patch('/updateUserStatus', async (req, res) => {
+    const info = req.body
+    const filter = { email: info.userEmail }
+    const status = info.packageName
+    const options = { upsert: true }
+    const updatedDoc = {
+      $set: {
+        userStatus: status
+      }
     }
-  }
-  const result=await userCollection.updateOne(filter,updatedDoc,options)
-  return res.send(result) })
-
+    const result = await userCollection.updateOne(filter, updatedDoc, options)
+    return res.send(result)
+  })
+//forum 
+//add forum
+app.post('/addForum',async(req,res)=>{
+  const forum=req.body
+  const result=await forumCollection.insertOne(forum)
+  res.send(result)
+})
 
 } catch (err) {
   console.log(err);
 }
-
-
-
-
-
-
-
 
 
 run().catch(console.dir);
