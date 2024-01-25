@@ -2,7 +2,9 @@ const express = require('express');
 const app = express();
 const cors = require('cors');
 const port = process.env.PORT || 5000;
+
 require('dotenv').config();
+const nodemailer = require("nodemailer");
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser')
 const moment = require('moment-timezone');
@@ -72,6 +74,58 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.kdy82ie.mongodb.net/?retryWrites=true&w=majority`;
 
 
+
+//email  ////////////////////////////////////////////////////////
+
+const sendEmail =(emailAddress, emailData)=>{
+//create transporter
+const transporter =nodemailer.createTransport({
+  service:'gmail',
+  host:'smtp.gmail.com',
+  port:587,
+  secure:false,
+  auth:{
+    user: process.env.USER,
+    pass: process.env.PASS
+  }
+})
+
+transporter.verify((error,success)=>{
+  if(error){
+    console.log(error);
+  }
+  else{
+    console.log('surver is ready for ee');
+  }
+})
+
+const mailBody = {
+  from: process.env.MAIL,
+  to: emailAddress,
+  subject: emailData?.subject,
+  html: `<p>${emailData?.message}</p>`,
+}
+
+transporter.sendMail(mailBody, (error, info) => {
+  if (error) {
+    console.log(error)
+  } else {
+    console.log('Email sent: ' + info.response)
+  }
+})
+
+
+}
+
+
+
+
+
+
+
+
+
+
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -92,6 +146,7 @@ const forumCollection = client.db("MAPMYFITNESS").collection("forum");
 
 
 async function run() {
+
   try {
 
     await client.connect();
@@ -125,6 +180,14 @@ try {
     const result = await userCollection.insertOne(user);
     res.send(result);
   })
+  //send login user info without any client data for js file
+  app.get('/user', verifyToken, async (req, res) => {
+    const userEmail = req.user.email;
+    console.log(userEmail, 'fffff');
+    const query = { email: userEmail };
+    const result = await userCollection.findOne(query);
+    res.send(result);
+  })
   //update user login time
   app.put('/user/:email', async (req, res) => {
     const email = req.params.email;
@@ -140,15 +203,18 @@ try {
   }
   )
   // get login user info from userCollection
-  app.get('/userInfo/:email', verifyToken, async (req, res) => {
+  app.get('/userInfo/:email', async (req, res) => {
     const email = req.params.email;
     const query = { email: email }
+
     const user = await userCollection.findOne(query);
-    res.send(user);
+
+    return res.send(user);
   })
   // get all user
   app.get('/getallUser', verifyToken, async (req, res) => {
-    const result = await userCollection.find().toArray();
+    const result = await userCollection.find({}).toArray();
+
     return res.send(result);
   })
   //delete a user
@@ -250,22 +316,24 @@ try {
     }
     return res.send('already unlike');
   })
+  //get my posted blog
+  app.get('/myBlogs/:email', verifyToken, async (req, res) => {
+    const email = req.params.email;
+    const query = { email: email }
+    const result = await blogCollection.find(query).toArray();
+
+
+    return res.send(result)
+  }
+  )
 
   // get blog like count
   app.get('/likeCount/:id', async (req, res) => {
     const id = req.params.id
-
-
     const query = { _id: new ObjectId(id) }
-
     const result = await blogCollection.findOne(query);
-
     const count = result?.likes?.length;
-
     return res.send(count?.toString());
-
-
-
   })
 
 
@@ -289,7 +357,95 @@ try {
     return res.send(result)
   })
 
-  //NEWSLETTER
+  /////////////////////////////////////forum ///////////////////////////////////////////////
+  //add forum
+  app.post('/addForum', async (req, res) => {
+    const forum = req.body
+    const result = await forumCollection.insertOne(forum)
+    res.send(result)
+  })
+  // get all forum
+  app.get('/forums', async (req, res) => {
+
+    const query = req.query;
+
+    const page = parseInt(query.page);
+    const size = parseInt(query.size);
+
+    const forums = await forumCollection.find().sort({ date: -1 })
+      .skip(page * size)
+      .limit(size)
+      .toArray();
+    return res.send(forums);
+  })
+  // get published forum number
+  app.get('/forumsCount', async (req, res) => {
+
+    const count = await forumCollection.estimatedDocumentCount()
+    return res.send({ count });
+
+  })
+  // get single forum
+  app.get('/forum/:id', verifyToken, async (req, res) => {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) }
+
+    const result = await forumCollection.findOne(query);
+    return res.send(result);
+  })
+  // add like in forum
+  app.put('/forumLike', verifyToken, async (req, res) => {
+    const { id, email } = req.body;
+
+    const query = { _id: new ObjectId(id) }
+    const option = { upsert: true };
+    const forum = await forumCollection.findOne(query);
+    const isLiked = forum?.likes?.includes(email);
+    if (isLiked) {
+      return res.send('already liked');
+    }
+    const updateDoc = await forumCollection.updateOne(query, { $push: { likes: email } }, option)
+    return res.send(updateDoc);
+  })
+  app.put('/forumUnlike', verifyToken, async (req, res) => {
+    const { id, email } = req.body;
+
+    const query = { _id: new ObjectId(id) }
+    const option = { upsert: true };
+    const forum = await forumCollection.findOne(query);
+    const isLiked = forum?.likes?.includes(email);
+
+
+    if (isLiked) {
+      const updateDoc = await forumCollection.updateOne(query, { $pull: { likes: email } }, option)
+      return res.send(updateDoc);
+    }
+    return res.send('already unlike');
+  })
+  // get forum like count
+  app.get('/forumLikeCount/:id', async (req, res) => {
+    const id = req.params.id
+    const query = { _id: new ObjectId(id) }
+    const result = await forumCollection.findOne(query);
+    const count = result?.likes?.length;
+    return res.send(count?.toString());
+  })
+
+  app.get('/checkForumLike/:id', verifyToken, async (req, res) => {
+    const id = req.params.id
+    const query = { _id: new ObjectId(id) }
+    const result = await forumCollection.findOne(query)
+    const email = req.query.email
+
+    const isLiked = result?.likes?.includes(email)
+    if (isLiked) {
+      return res.send(true)
+    }
+    return res.send(false)
+  })
+
+
+  //NEWSLETTER/////////////////////////////////////////////////////////////////////////////
   //subscribe newsletter 
   app.post('/newsLetter', async (req, res) => {
 
@@ -372,8 +528,8 @@ try {
   // get a trainer
   app.get('/getTrainer/:id', async (req, res) => {
     const id = req.params.id
-    
-    const query = { _id:  new ObjectId(id)}
+
+    const query = { _id: new ObjectId(id) }
     const result = await trainerCollection.findOne(query)
     return res.send(result)
   })
@@ -382,38 +538,54 @@ try {
   app.get('/getLoginTrainer/:email', async (req, res) => {
     const email = req.params.email
 
-    const query = { email:  email}
+    const query = { email: email }
     const result = await trainerCollection.findOne(query)
     return res.send(result)
   })
   //get trainer classes for user
   app.get('/getTrainerClasses/:id', async (req, res) => {
     const id = req.params.id
-      console.log(id);
-    const query = {_id: new ObjectId(id)}
-    
+    console.log(id);
+    const query = { _id: new ObjectId(id) }
+
 
     const result1 = await trainerCollection.findOne(query)
     const query1 = { trainerEmail: result1?.email }
     const result = await classCollection.find(query1).toArray()
- 
+
     return res.send(result)
   })
   //get trainer classes trainer dashboard
   app.get('/getMyAddedClasses/:email', async (req, res) => {
     const email = req.params.email
-      console.log(email);
-    const query = {email: email}
-    
+    console.log(email);
+    const query = { email: email }
+
 
     const result1 = await trainerCollection.findOne(query)
     const query1 = { trainerEmail: result1?.email }
     const result = await classCollection.find(query1).toArray()
- 
+
     return res.send(result)
   })
+  // get joined students in a class
+  app.get('/joinedStudents/:id', async (req, res) => {
+    const { id } = req.params
+    const query = { _id: new ObjectId(id) }
+    const result = await classCollection.findOne(query, { projection: { classStudent: 1 } })
+    console.log(result?.classStudent);
+    return res.send(result?.classStudent)
 
-  // class  
+  })
+  // remove join student
+  app.patch('/deleteJoinedStudent', async (req, res) => {
+    const info = req.body
+
+    const query = { _id: new ObjectId(info.id) }
+    const result = await classCollection.updateOne(query, { $pull: { classStudent: info.email } })
+    res.send(result)
+  })
+  // class  /////////////////////////////////////////////////////////////////////////
   //add class 
   app.post('/addClass', async (req, res) => {
 
@@ -431,7 +603,8 @@ try {
   //get classes for home page
   app.get('/getHomeClasses', async (req, res) => {
     const result = await classCollection.find({}).limit(6).toArray()
-    return res.send(result)})
+    return res.send(result)
+  })
   //get single class by id
   app.get('/getClassInfo/:id', async (req, res) => {
     const id = req.params.id
@@ -444,7 +617,7 @@ try {
     const data = req.body
 
     const { id, email } = req.body;
-   
+
     const query = { _id: new ObjectId(id) }
 
     const option = { upsert: true };
@@ -456,24 +629,35 @@ try {
     const updateDoc = await classCollection.updateOne(query, { $push: { classStudent: email } })
     return res.send(updateDoc);
   })
+//get Recommended class
+app.get('/recommendedClasses',async(req,res)=>{
+  const result =await classCollection.aggregate([
+    {
+      $match: {
+        classPrice: 'free' // Filter classes with status 'free'
+      }
+    }
+    
+  ]).limit(3).toArray()
+  return res.send(result)
+})
+  // get user joined classes
+  app.get('/userJoinedClasses/:email', async (req, res) => {
+    const { email } = req.params
+    console.log(email, 'jj');
+    const query = { classStudent: { $elemMatch: { $eq: email } } }
+    const result = await classCollection.find(query).toArray()
 
-// get user joined classes
-app.get('/userJoinedClasses/:email',async(req,res)=>{
-  const {email} = req.params
-  console.log(email,'jj');
-  const query ={classStudent: {$elemMatch: {$eq: email}}}
-  const result = await classCollection.find(query).toArray()
- 
-  res.send(result)
-})
-//delete user course by class id and user email
-app.patch('/deleteUserClass',async(req,res)=>{
-   const {userEmail,classId}=req.body
- const query = { _id: new ObjectId(classId) }
- const result= await classCollection.updateOne(query, { $pull: { classStudent: userEmail } })
- res.send(result)
- console.log(result);
-})
+    res.send(result)
+  })
+  //delete user course by class id and user email
+  app.patch('/deleteUserClass', async (req, res) => {
+    const { userEmail, classId } = req.body
+    const query = { _id: new ObjectId(classId) }
+    const result = await classCollection.updateOne(query, { $pull: { classStudent: userEmail } })
+    res.send(result)
+    console.log(result);
+  })
 
 
 
@@ -497,7 +681,21 @@ app.patch('/deleteUserClass',async(req,res)=>{
     const payment = req.body
     const result = await paymentCollection.insertOne(payment)
     //SEND EMAIL
-    return res.send(result)
+    if (result.insertedId) {
+      // To guest
+      sendEmail(payment.userEmail, {
+        subject: 'Payment Successful!',
+        message: ` Your user status is ${payment.packageName} now .Total payment ${payment
+        .packagePrice}.Date ${payment.date}. Transaction Id: ${payment.transactionId}`,
+      })
+
+    
+    return res.send(result)}
+  })
+  //get all payment users
+  app.get('/getAllPaymentUsers', async (req, res) => {
+    const result = await paymentCollection.find({}).toArray()
+    res.send(result)
   })
   //update user status
   app.patch('/updateUserStatus', async (req, res) => {
@@ -513,13 +711,99 @@ app.patch('/deleteUserClass',async(req,res)=>{
     const result = await userCollection.updateOne(filter, updatedDoc, options)
     return res.send(result)
   })
-//forum 
-//add forum
-app.post('/addForum',async(req,res)=>{
-  const forum=req.body
-  const result=await forumCollection.insertOne(forum)
+
+  //user states
+  app.get('/getUserStates', async (req, res) => {
+    const userCounts = await userCollection.aggregate([
+      {
+        $group: {
+          _id: "$userStatus",
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray()
+    res.send(userCounts)
+  })
+  //get newsletter to premium convention
+  app.get('/newsToPremium', async (req, res) => {
+    const result = await paymentCollection.aggregate([
+      {
+        $group: {
+          _id: "$userEmail",
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalUniquePaymentEmails: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalUniquePaymentEmails: 1
+        }
+      }
+    ]).toArray()
+   
+   const result2 = (await newsLetterSubCollection.estimatedDocumentCount()).toLocaleString()
+   const result3 = (await userCollection.estimatedDocumentCount()).toLocaleString()
+    const data=[{
+      PremiumUsers:result[0].totalUniquePaymentEmails,
+      NewsLetterSubscribers:result2,
+      totalUsers:result3
+    }]
+    res.send(data)
+  })
+
+//get payment data
+app.get('/getPaymentProfit',async(req,res)=>{
+  const result =await paymentCollection.aggregate([
+    {
+      $group: {
+        _id: '$userEmail',
+        totalPrices: { $sum: '$packagePrice' },
+        count: { $sum: 1 }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalPrice: { $sum: '$totalPrices' },
+        userCountWithMultiplePayments: { $sum: { $cond: { if: { $gt: ['$count', 1] }, then: 1, else: 0 } } },
+        uniqueUserCount: { $sum: 1 } // Count of unique users
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        totalPrice: 1,
+        userCountWithMultiplePayments: 1,
+        uniqueUserCount: 1
+      }
+    }
+  ]).toArray()
   res.send(result)
 })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 } catch (err) {
   console.log(err);
